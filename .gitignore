@@ -18,3 +18,36 @@ __pycache__/
 **/output/
 **/build/
 weights/*
+logs/
+generated_images/
+
+# Model weights and data (too large for git)
+/weights/
+/weights/**
+/logs/
+*.png
+*.jpg
+*.jpeg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+

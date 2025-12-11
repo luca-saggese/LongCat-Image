@@ -47,3 +47,17 @@ misc/
 .editorconfig
 *.md
 !API.md
+
+# CRITICAL: Exclude weights directory to prevent huge Docker images
+weights/
+weights/**
+logs/
+generated_images/
+*.png
+*.jpg
+*.jpeg
+.git/
+.github/
+.gitpod.yml
+*.pth
+*.safetensors
