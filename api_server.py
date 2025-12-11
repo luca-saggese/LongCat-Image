@@ -10,6 +10,7 @@ import io
 import os
 import torch
 import subprocess
+import gc
 from typing import Optional, List
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +23,10 @@ from PIL import Image
 
 from longcat_image.models import LongCatImageTransformer2DModel
 from longcat_image.pipelines import LongCatImagePipeline, LongCatImageEditPipeline
+
+# Memory optimization
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 
 # ==================== Configuration ====================
@@ -134,16 +139,32 @@ def load_t2i_pipeline():
     global t2i_pipe
     
     print(f"Loading T2I pipeline from {T2I_CHECKPOINT}")
+    print(f"Device: {DEVICE}")
+    print(f"CPU Offload: {USE_CPU_OFFLOAD}")
+    
+    # Clear cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+    gc.collect()
+    
     text_processor = AutoProcessor.from_pretrained(
         T2I_CHECKPOINT, 
-        subfolder='tokenizer'
+        subfolder='tokenizer',
+        trust_remote_code=True
     )
+    
+    # Load transformer with memory optimization
     transformer = LongCatImageTransformer2DModel.from_pretrained(
         T2I_CHECKPOINT,
         subfolder='transformer',
         torch_dtype=torch.bfloat16,
-        use_safetensors=True
-    ).to(DEVICE)
+        use_safetensors=True,
+        device_map="auto" if USE_CPU_OFFLOAD else None
+    )
+    
+    if not USE_CPU_OFFLOAD:
+        transformer = transformer.to(DEVICE)
 
     t2i_pipe = LongCatImagePipeline.from_pretrained(
         T2I_CHECKPOINT,
@@ -152,10 +173,14 @@ def load_t2i_pipeline():
         torch_dtype=torch.bfloat16
     )
     
-    if USE_CPU_OFFLOAD:
-        t2i_pipe.enable_model_cpu_offload()
-    else:
-        t2i_pipe.to(DEVICE, torch.bfloat16)
+    # Always enable CPU offload for memory efficiency
+    t2i_pipe.enable_model_cpu_offload()
+    t2i_pipe.enable_attention_slicing()
+    
+    # Clear cache after loading
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     print("T2I pipeline loaded successfully")
 
@@ -165,16 +190,30 @@ def load_edit_pipeline():
     global edit_pipe
     
     print(f"Loading Edit pipeline from {EDIT_CHECKPOINT}")
+    
+    # Clear cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+    gc.collect()
+    
     text_processor = AutoProcessor.from_pretrained(
         EDIT_CHECKPOINT,
-        subfolder='tokenizer'
+        subfolder='tokenizer',
+        trust_remote_code=True
     )
+    
+    # Load transformer with memory optimization
     transformer = LongCatImageTransformer2DModel.from_pretrained(
         EDIT_CHECKPOINT,
         subfolder='transformer',
         torch_dtype=torch.bfloat16,
-        use_safetensors=True
-    ).to(DEVICE)
+        use_safetensors=True,
+        device_map="auto" if USE_CPU_OFFLOAD else None
+    )
+    
+    if not USE_CPU_OFFLOAD:
+        transformer = transformer.to(DEVICE)
 
     edit_pipe = LongCatImageEditPipeline.from_pretrained(
         EDIT_CHECKPOINT,
@@ -183,10 +222,14 @@ def load_edit_pipeline():
         torch_dtype=torch.bfloat16
     )
     
-    if USE_CPU_OFFLOAD:
-        edit_pipe.enable_model_cpu_offload()
-    else:
-        edit_pipe.to(DEVICE, torch.bfloat16)
+    # Always enable CPU offload for memory efficiency
+    edit_pipe.enable_model_cpu_offload()
+    edit_pipe.enable_attention_slicing()
+    
+    # Clear cache after loading
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     print("Edit pipeline loaded successfully")
 

@@ -31,8 +31,9 @@ services:
       - USE_CPU_OFFLOAD=true
       - MAX_BATCH_SIZE=1
       
-      # CUDA configuration
+      # CUDA configuration for memory optimization
       - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     
     # GPU support
     deploy:
