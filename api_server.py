@@ -56,7 +56,7 @@ class TextToImageRequest(BaseModel):
     n: int = 1  # number of images
     size: Optional[str] = "1344x768"  # width x height
     guidance_scale: Optional[float] = 4.5
-    num_inference_steps: Optional[int] = 50
+    num_inference_steps: Optional[int] = 30  # Reduced from 50 for memory
     seed: Optional[int] = None
     response_format: Optional[str] = "b64_json"
 
@@ -67,7 +67,7 @@ class ImageEditRequest(BaseModel):
     negative_prompt: Optional[str] = ""
     n: int = 1
     guidance_scale: Optional[float] = 4.5
-    num_inference_steps: Optional[int] = 50
+    num_inference_steps: Optional[int] = 30  # Reduced from 50 for memory
     seed: Optional[int] = None
     response_format: Optional[str] = "b64_json"
 
@@ -136,6 +136,29 @@ def check_and_download_models():
     print("="*60 + "\n")
 
 
+def unload_all_pipelines():
+    """Unload all pipelines to free memory"""
+    global t2i_pipe, edit_pipe, t2i_loaded, edit_loaded
+    
+    print("Unloading pipelines to free memory...")
+    
+    if t2i_pipe is not None:
+        del t2i_pipe
+        t2i_pipe = None
+        t2i_loaded = False
+    
+    if edit_pipe is not None:
+        del edit_pipe
+        edit_pipe = None
+        edit_loaded = False
+    
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    print("✓ Memory freed")
+
+
 def load_t2i_pipeline():
     """Load text-to-image pipeline"""
     global t2i_pipe, t2i_loaded
@@ -188,6 +211,11 @@ def load_t2i_pipeline():
         t2i_pipe.enable_model_cpu_offload()
         t2i_pipe.enable_attention_slicing()
         t2i_pipe.enable_vae_tiling()
+        
+        # Additional memory optimization
+        if hasattr(t2i_pipe, 'vae'):
+            t2i_pipe.vae.enable_slicing()
+        
         print("✓ Memory optimizations enabled")
         
         # Final cleanup
@@ -257,6 +285,11 @@ def load_edit_pipeline():
         edit_pipe.enable_model_cpu_offload()
         edit_pipe.enable_attention_slicing()
         edit_pipe.enable_vae_tiling()
+        
+        # Additional memory optimization
+        if hasattr(edit_pipe, 'vae'):
+            edit_pipe.vae.enable_slicing()
+        
         print("✓ Memory optimizations enabled")
         
         # Final cleanup
@@ -386,7 +419,7 @@ async def text_to_image(request: TextToImageRequest):
         print(f"Generating image: {request.prompt[:50]}...")
         
         # Generate images
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.cuda.device(DEVICE):
             output = t2i_pipe(
                 request.prompt,
                 negative_prompt=request.negative_prompt or "",
@@ -396,8 +429,8 @@ async def text_to_image(request: TextToImageRequest):
                 num_inference_steps=request.num_inference_steps,
                 num_images_per_prompt=request.n,
                 generator=generator,
-                enable_cfg_renorm=True,
-                enable_prompt_rewrite=True
+                enable_cfg_renorm=False,
+                enable_prompt_rewrite=False  # Disable to save memory
             )
         
         # Clear memory after generation
