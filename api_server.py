@@ -154,26 +154,27 @@ def load_t2i_pipeline():
         trust_remote_code=True
     )
     
-    # Load transformer with memory optimization
+    # Load transformer WITHOUT moving to device - let device_map handle it
+    print("Loading transformer model...")
     transformer = LongCatImageTransformer2DModel.from_pretrained(
         T2I_CHECKPOINT,
         subfolder='transformer',
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,  # Use float16 instead of bfloat16 for better compatibility
+        device_map="cpu",  # Load on CPU first
         use_safetensors=True,
-        device_map="auto" if USE_CPU_OFFLOAD else None
+        trust_remote_code=True
     )
-    
-    if not USE_CPU_OFFLOAD:
-        transformer = transformer.to(DEVICE)
 
+    print("Creating pipeline...")
     t2i_pipe = LongCatImagePipeline.from_pretrained(
         T2I_CHECKPOINT,
         transformer=transformer,
         text_processor=text_processor,
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.float16
     )
     
-    # Always enable CPU offload for memory efficiency
+    # Enable all memory optimizations
+    print("Enabling memory optimizations...")
     t2i_pipe.enable_model_cpu_offload()
     t2i_pipe.enable_attention_slicing()
     
@@ -182,7 +183,7 @@ def load_t2i_pipeline():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     
-    print("T2I pipeline loaded successfully")
+    print("✓ T2I pipeline loaded successfully")
 
 
 def load_edit_pipeline():
@@ -203,26 +204,27 @@ def load_edit_pipeline():
         trust_remote_code=True
     )
     
-    # Load transformer with memory optimization
+    # Load transformer WITHOUT moving to device - let device_map handle it
+    print("Loading transformer model...")
     transformer = LongCatImageTransformer2DModel.from_pretrained(
         EDIT_CHECKPOINT,
         subfolder='transformer',
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,  # Use float16 instead of bfloat16
+        device_map="cpu",  # Load on CPU first
         use_safetensors=True,
-        device_map="auto" if USE_CPU_OFFLOAD else None
+        trust_remote_code=True
     )
-    
-    if not USE_CPU_OFFLOAD:
-        transformer = transformer.to(DEVICE)
 
+    print("Creating pipeline...")
     edit_pipe = LongCatImageEditPipeline.from_pretrained(
         EDIT_CHECKPOINT,
         transformer=transformer,
         text_processor=text_processor,
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.float16
     )
     
-    # Always enable CPU offload for memory efficiency
+    # Enable all memory optimizations
+    print("Enabling memory optimizations...")
     edit_pipe.enable_model_cpu_offload()
     edit_pipe.enable_attention_slicing()
     
@@ -231,7 +233,7 @@ def load_edit_pipeline():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     
-    print("Edit pipeline loaded successfully")
+    print("✓ Edit pipeline loaded successfully")
 
 
 @asynccontextmanager
@@ -328,6 +330,11 @@ async def text_to_image(request: TextToImageRequest):
                 detail=f"n cannot exceed {MAX_BATCH_SIZE}"
             )
         
+        # Clear memory before generation
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         width, height = parse_size(request.size or "1344x768")
         
         # Create generator if seed is provided
@@ -335,19 +342,27 @@ async def text_to_image(request: TextToImageRequest):
         if request.seed is not None:
             generator = torch.Generator("cpu").manual_seed(request.seed)
         
+        print(f"Generating image: {request.prompt[:50]}...")
+        
         # Generate images
-        output = t2i_pipe(
-            request.prompt,
-            negative_prompt=request.negative_prompt or "",
-            height=height,
-            width=width,
-            guidance_scale=request.guidance_scale,
-            num_inference_steps=request.num_inference_steps,
-            num_images_per_prompt=request.n,
-            generator=generator,
-            enable_cfg_renorm=True,
-            enable_prompt_rewrite=True
-        )
+        with torch.inference_mode():
+            output = t2i_pipe(
+                request.prompt,
+                negative_prompt=request.negative_prompt or "",
+                height=height,
+                width=width,
+                guidance_scale=request.guidance_scale,
+                num_inference_steps=request.num_inference_steps,
+                num_images_per_prompt=request.n,
+                generator=generator,
+                enable_cfg_renorm=True,
+                enable_prompt_rewrite=True
+            )
+        
+        # Clear memory after generation
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         # Prepare response
         images_data = []
@@ -362,6 +377,8 @@ async def text_to_image(request: TextToImageRequest):
                     "url": f"data:image/png;base64,{image_to_base64(image)}",
                     "index": idx
                 })
+        
+        print("✓ Image generation completed")
         
         return {
             "created": int(torch.cuda.Event(enable_timing=True).record()),
@@ -401,6 +418,11 @@ async def image_edit(
                 detail=f"n cannot exceed {MAX_BATCH_SIZE}"
             )
         
+        # Clear memory before edit
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         # Read image from upload
         image_content = await image.read()
         pil_image = Image.open(io.BytesIO(image_content)).convert('RGB')
@@ -410,16 +432,24 @@ async def image_edit(
         if seed is not None:
             generator = torch.Generator("cpu").manual_seed(seed)
         
+        print(f"Editing image with prompt: {prompt[:50]}...")
+        
         # Generate edited images
-        output = edit_pipe(
-            pil_image,
-            prompt,
-            negative_prompt=negative_prompt or "",
-            guidance_scale=guidance_scale,
-            num_inference_steps=num_inference_steps,
-            num_images_per_prompt=n,
-            generator=generator
-        )
+        with torch.inference_mode():
+            output = edit_pipe(
+                pil_image,
+                prompt,
+                negative_prompt=negative_prompt or "",
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_inference_steps,
+                num_images_per_prompt=n,
+                generator=generator
+            )
+        
+        # Clear memory after edit
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         # Prepare response
         images_data = []
@@ -434,6 +464,8 @@ async def image_edit(
                     "url": f"data:image/png;base64,{image_to_base64(image)}",
                     "index": idx
                 })
+        
+        print("✓ Image editing completed")
         
         return {
             "created": int(torch.cuda.Event(enable_timing=True).record()),
