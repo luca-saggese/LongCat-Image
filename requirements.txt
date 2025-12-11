@@ -46,3 +46,6 @@ urllib3==2.5.0
 zipp==3.23.0
 openai==2.8.1
 peft==0.18.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+python-multipart==0.0.7

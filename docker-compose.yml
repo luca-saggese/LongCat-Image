@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  longcat-image-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: longcat-image-api:latest
+    container_name: longcat-image-api
+    
+    # Port mapping
+    ports:
+      - "8000:8000"
+    
+    # Volume mounts for model weights
+    volumes:
+      - ./weights:/app/weights
+      - ./logs:/app/logs
+    
+    # Environment variables
+    environment:
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      
+      # Model paths
+      - T2I_CHECKPOINT=/app/weights/LongCat-Image
+      - EDIT_CHECKPOINT=/app/weights/LongCat-Image-Edit
+      
+      # Performance tuning
+      - USE_CPU_OFFLOAD=true
+      - MAX_BATCH_SIZE=1
+      
+      # CUDA configuration
+      - CUDA_VISIBLE_DEVICES=0
+    
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
