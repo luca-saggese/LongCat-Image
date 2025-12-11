@@ -39,6 +39,8 @@ MAX_BATCH_SIZE = int(os.getenv('MAX_BATCH_SIZE', '1'))
 # Global pipeline instances
 t2i_pipe = None
 edit_pipe = None
+t2i_loaded = False
+edit_loaded = False
 
 
 # ==================== Models ====================
@@ -136,104 +138,140 @@ def check_and_download_models():
 
 def load_t2i_pipeline():
     """Load text-to-image pipeline"""
-    global t2i_pipe
+    global t2i_pipe, t2i_loaded
     
-    print(f"Loading T2I pipeline from {T2I_CHECKPOINT}")
-    print(f"Device: {DEVICE}")
-    print(f"CPU Offload: {USE_CPU_OFFLOAD}")
+    if t2i_loaded and t2i_pipe is not None:
+        print("T2I pipeline already loaded")
+        return
     
-    # Clear cache
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-    gc.collect()
+    print(f"\n{'='*60}")
+    print("Loading T2I pipeline...")
+    print(f"{'='*60}")
     
-    text_processor = AutoProcessor.from_pretrained(
-        T2I_CHECKPOINT, 
-        subfolder='tokenizer',
-        trust_remote_code=True
-    )
-    
-    # Load transformer WITHOUT moving to device - let device_map handle it
-    print("Loading transformer model...")
-    transformer = LongCatImageTransformer2DModel.from_pretrained(
-        T2I_CHECKPOINT,
-        subfolder='transformer',
-        torch_dtype=torch.float16,  # Use float16 instead of bfloat16 for better compatibility
-        device_map="cpu",  # Load on CPU first
-        use_safetensors=True,
-        trust_remote_code=True
-    )
-
-    print("Creating pipeline...")
-    t2i_pipe = LongCatImagePipeline.from_pretrained(
-        T2I_CHECKPOINT,
-        transformer=transformer,
-        text_processor=text_processor,
-        torch_dtype=torch.float16
-    )
-    
-    # Enable all memory optimizations
-    print("Enabling memory optimizations...")
-    t2i_pipe.enable_model_cpu_offload()
-    t2i_pipe.enable_attention_slicing()
-    
-    # Clear cache after loading
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    
-    print("✓ T2I pipeline loaded successfully")
+    try:
+        # Aggressive memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+        gc.collect()
+        
+        text_processor = AutoProcessor.from_pretrained(
+            T2I_CHECKPOINT, 
+            subfolder='tokenizer',
+            trust_remote_code=True
+        )
+        print("✓ Text processor loaded")
+        
+        # Load transformer on CPU only
+        print("Loading transformer (CPU)...")
+        transformer = LongCatImageTransformer2DModel.from_pretrained(
+            T2I_CHECKPOINT,
+            subfolder='transformer',
+            torch_dtype=torch.float16,
+            device_map="cpu",
+            use_safetensors=True,
+            trust_remote_code=True
+        )
+        print("✓ Transformer loaded on CPU")
+        
+        # Create pipeline
+        print("Creating pipeline...")
+        t2i_pipe = LongCatImagePipeline.from_pretrained(
+            T2I_CHECKPOINT,
+            transformer=transformer,
+            text_processor=text_processor,
+            torch_dtype=torch.float16
+        )
+        print("✓ Pipeline created")
+        
+        # Enable optimizations
+        t2i_pipe.enable_model_cpu_offload()
+        t2i_pipe.enable_attention_slicing()
+        t2i_pipe.enable_vae_tiling()
+        print("✓ Memory optimizations enabled")
+        
+        # Final cleanup
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        t2i_loaded = True
+        print(f"{'='*60}")
+        print("✓ T2I pipeline ready")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"✗ Error loading T2I pipeline: {str(e)}")
+        raise
 
 
 def load_edit_pipeline():
     """Load image editing pipeline"""
-    global edit_pipe
+    global edit_pipe, edit_loaded
     
-    print(f"Loading Edit pipeline from {EDIT_CHECKPOINT}")
+    if edit_loaded and edit_pipe is not None:
+        print("Edit pipeline already loaded")
+        return
     
-    # Clear cache
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-    gc.collect()
+    print(f"\n{'='*60}")
+    print("Loading Edit pipeline...")
+    print(f"{'='*60}")
     
-    text_processor = AutoProcessor.from_pretrained(
-        EDIT_CHECKPOINT,
-        subfolder='tokenizer',
-        trust_remote_code=True
-    )
-    
-    # Load transformer WITHOUT moving to device - let device_map handle it
-    print("Loading transformer model...")
-    transformer = LongCatImageTransformer2DModel.from_pretrained(
-        EDIT_CHECKPOINT,
-        subfolder='transformer',
-        torch_dtype=torch.float16,  # Use float16 instead of bfloat16
-        device_map="cpu",  # Load on CPU first
-        use_safetensors=True,
-        trust_remote_code=True
-    )
-
-    print("Creating pipeline...")
-    edit_pipe = LongCatImageEditPipeline.from_pretrained(
-        EDIT_CHECKPOINT,
-        transformer=transformer,
-        text_processor=text_processor,
-        torch_dtype=torch.float16
-    )
-    
-    # Enable all memory optimizations
-    print("Enabling memory optimizations...")
-    edit_pipe.enable_model_cpu_offload()
-    edit_pipe.enable_attention_slicing()
-    
-    # Clear cache after loading
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    
-    print("✓ Edit pipeline loaded successfully")
+    try:
+        # Aggressive memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+        gc.collect()
+        
+        text_processor = AutoProcessor.from_pretrained(
+            EDIT_CHECKPOINT,
+            subfolder='tokenizer',
+            trust_remote_code=True
+        )
+        print("✓ Text processor loaded")
+        
+        # Load transformer on CPU only
+        print("Loading transformer (CPU)...")
+        transformer = LongCatImageTransformer2DModel.from_pretrained(
+            EDIT_CHECKPOINT,
+            subfolder='transformer',
+            torch_dtype=torch.float16,
+            device_map="cpu",
+            use_safetensors=True,
+            trust_remote_code=True
+        )
+        print("✓ Transformer loaded on CPU")
+        
+        # Create pipeline
+        print("Creating pipeline...")
+        edit_pipe = LongCatImageEditPipeline.from_pretrained(
+            EDIT_CHECKPOINT,
+            transformer=transformer,
+            text_processor=text_processor,
+            torch_dtype=torch.float16
+        )
+        print("✓ Pipeline created")
+        
+        # Enable optimizations
+        edit_pipe.enable_model_cpu_offload()
+        edit_pipe.enable_attention_slicing()
+        edit_pipe.enable_vae_tiling()
+        print("✓ Memory optimizations enabled")
+        
+        # Final cleanup
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        edit_loaded = True
+        print(f"{'='*60}")
+        print("✓ Edit pipeline ready")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"✗ Error loading Edit pipeline: {str(e)}")
+        raise
 
 
 @asynccontextmanager
@@ -242,19 +280,17 @@ async def lifespan(app: FastAPI):
     # Check and download models if needed
     check_and_download_models()
     
-    # Load pipelines on startup
-    try:
-        load_t2i_pipeline()
-        load_edit_pipeline()
-        print("All pipelines loaded successfully")
-    except Exception as e:
-        print(f"Error loading pipelines: {e}")
-        raise
+    # DO NOT load pipelines on startup - use lazy loading instead
+    # This prevents OOM errors when multiple models need to load
+    print("\n" + "="*60)
+    print("API Server initialized (lazy loading enabled)")
+    print("Pipelines will be loaded on first use")
+    print("="*60 + "\n")
     
     yield
     
     # Cleanup on shutdown
-    print("Shutting down...")
+    print("\nShutting down...")
 
 
 # ==================== FastAPI App ====================
@@ -321,6 +357,11 @@ async def text_to_image(request: TextToImageRequest):
     Compatible with: POST /v1/images/generations
     """
     try:
+        # Lazy load pipeline
+        if not t2i_loaded:
+            print("First request - loading T2I pipeline...")
+            load_t2i_pipeline()
+        
         if not t2i_pipe:
             raise HTTPException(status_code=500, detail="T2I pipeline not loaded")
         
@@ -409,6 +450,11 @@ async def image_edit(
     Compatible with: POST /v1/images/edits
     """
     try:
+        # Lazy load pipeline
+        if not edit_loaded:
+            print("First request - loading Edit pipeline...")
+            load_edit_pipeline()
+        
         if not edit_pipe:
             raise HTTPException(status_code=500, detail="Edit pipeline not loaded")
         
@@ -486,8 +532,8 @@ async def health_check():
         "status": "ok",
         "device": str(DEVICE),
         "cuda_available": torch.cuda.is_available(),
-        "t2i_loaded": t2i_pipe is not None,
-        "edit_loaded": edit_pipe is not None
+        "t2i_loaded": t2i_loaded,
+        "edit_loaded": edit_loaded
     }
 
 
